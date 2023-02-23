@@ -1,0 +1,156 @@
+---
+title: "Análisis de Riesgo de una Compañía Aseguradora"
+author: "Cantú Rodríguez Pamela	(A01285128), Ferreira Guadarrama Emiliano	(A01654418), Núñez López Daniel I.	(A01654137), Ruiz Alvaro Ana Paula (A01367467), Ugalde Jiménez Ana Sofía (A01702639)"
+date: "8/22/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("../Desktop")
+```
+
+```{r import_dataset}
+ds = read.csv("Datos_aseguradora.csv")
+```
+
+# Limpieza inicial de la base de datos
+
+```{r limpieza_inicial}
+# eliminamos ~20 observaciones que no contienen tipo de auto, deducible ni reclamo de no cobertura
+df <- subset(ds, ds$Tipo.de.auto != "")
+
+# convertimos las columnas del df a fechas, factors o enteros
+df$Fecha.del.Siniestro <- as.Date(df$Fecha.del.Siniestro, format="%d/%m/%y")
+df$Tipo.de.auto <- factor(df$Tipo.de.auto)
+df$Modelo <- factor(df$Modelo, ordered = TRUE)
+df$Aplica.cobertura <- factor(df$Aplica.cobertura)
+df$Deducible[is.na(df$Deducible)] <- 0
+df$Deducible <- as.integer(df$Deducible)
+df$Reclamo.de.no.Cobertura <- factor(df$Reclamo.de.no.Cobertura)
+df$Pérdida.total <- factor(df$Pérdida.total)
+```
+
+```{r}
+x.range = seq(0, 250000, 1000)
+
+hist(df$Monto.del.siniestro, breaks = 1000, freq = F)
+lines(x.range, dgamma(x.range, shape = 1, scale = mean(df$Monto.del.siniestro)), col = 'red')
+```
+
+```{r}
+
+groups = split(df, df$Tipo.de.auto)
+montos = c()
+
+
+for (group in groups){
+  tab = table(group$Monto.del.siniestro)
+  tab = tab/sum(tab)
+  tab.min = as.integer(names(tab[1]))
+  tab.max = as.integer(names(tail(tab,1)))
+  mu = mean(group$Monto.del.siniestro)
+  montos = c(montos, mu)
+  
+  #plot(tab)
+  plot(tab, xlim = c(0, 342000), ylim = c(0, 0.004))
+}
+
+montos
+
+# plot(tab, xlim = c(10000, 20000))
+
+names(groups)
+for (group in groups){
+  print(dim(group))
+}
+
+aust = groups$Austero$Monto.del.siniestro[-c(1, 2, 3)]
+tab = table(aust)
+
+x = as.integer(names(tab))
+y = as.vector(tab)
+
+plot(x, y, type = 'h')
+lines(rep(mean(y), 10000), col='red')
+
+
+
+f = aust/sum(aust)
+
+a = min(aust)
+b = max(aust)
+
+1/12 * (b-a)^2
+var(aust)
+
+(a+b)/2
+mean(aust)
+
+1 / (b-a)
+mean(f)
+
+chisq.test(runif(aust, a, b), aust)
+
+
+plot(ecdf(aust))
+curve(punif(x, a, b), add = T, col = 'red')
+
+ks.test(aust, punif, a, b)
+```
+
+
+```{r preparacion_N}
+# generamos todos los días en el rango de dates
+all_days <- as.Date(seq(
+  min(df$Fecha.del.Siniestro),
+  by = "day",
+  length.out = as.integer(max(df$Fecha.del.Siniestro)+1 - min(df$Fecha.del.Siniestro))
+))
+
+# calculamos reclamos diarios con table
+right = data.frame(table(df$Fecha.del.Siniestro))
+right$Var1 <- as.Date(right$Var1)
+
+# si nuestro dataset tuviera días sin reclamos estos no aparecerían en la tabla de frecuencias
+left = data.frame(all_days)
+
+# utilizamos merge lo cual nos da un df con NA en las fechas que no hubo reclamos
+reclamos_diarios <- merge(left, right, by.x = 'all_days', by.y = "Var1", all.x = TRUE)
+
+# cambiamos el index a la columna de all_days
+rownames(reclamos_diarios) <- reclamos_diarios$all_days
+reclamos_diarios$all_days <- NULL
+
+# cambiamos los NAs por 0
+reclamos_diarios[is.na(reclamos_diarios)] <- 0
+
+# calculamos la proporción en la que sucede que haya x reclamos en un día
+proporciones = table(reclamos_diarios)/dim(reclamos_diarios)[1]
+
+x.ax = as.integer(names(proporciones))
+x.range = min(x.ax):max(x.ax)
+
+# también nos aseguramos de que las proporciones incluyan todos los valores dentro del rango de N
+proporciones = merge(
+  data.frame(reclamos_diarios = x.range),
+  data.frame(proporciones),
+  by = "reclamos_diarios",
+  all.x = TRUE
+  )
+
+# cambiamos el index a la columna de reclamos_diarios
+rownames(proporciones) <- x.range
+proporciones$reclamos_diarios <- NULL
+
+proporciones[is.na(proporciones)] <- 0
+```
+
+```{r}
+
+fisher.test(data.frame(proporciones, table(cut(df$Monto.del.siniestro, breaks=52)))[, c(1, 3)])
+
+```
+
+
+

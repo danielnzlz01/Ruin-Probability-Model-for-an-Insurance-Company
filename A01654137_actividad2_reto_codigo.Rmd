@@ -1,0 +1,260 @@
+---
+title: "Análisis de Riesgo de una Compañía Aseguradora"
+author: "Cantú Rodríguez Pamela	(A01285128), Ferreira Guadarrama Emiliano	(A01654418), Núñez López Daniel I.	(A01654137), Ruiz Alvaro Ana Paula (A01367467), Ugalde Jiménez Ana Sofía (A01702639)"
+date: "8/22/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("../Desktop")
+```
+
+```{r import_dataset}
+ds = read.csv("Datos_aseguradora.csv")
+```
+
+# Limpieza inicial de la base de datos
+
+```{r limpieza_inicial}
+# eliminamos ~20 observaciones que no contienen tipo de auto, deducible ni reclamo de no cobertura
+df <- subset(ds, ds$Tipo.de.auto != "")
+
+# convertimos las columnas del df a fechas, factors o enteros
+df$Fecha.del.Siniestro <- as.Date(df$Fecha.del.Siniestro, format="%d/%m/%y")
+df$Tipo.de.auto <- factor(df$Tipo.de.auto)
+df$Modelo <- factor(df$Modelo, ordered = TRUE)
+df$Aplica.cobertura <- factor(df$Aplica.cobertura)
+df$Deducible[is.na(df$Deducible)] <- 0
+df$Deducible <- as.integer(df$Deducible)
+df$Reclamo.de.no.Cobertura <- factor(df$Reclamo.de.no.Cobertura)
+df$Pérdida.total <- factor(df$Pérdida.total)
+
+summary(df)
+```
+
+# Número de reclamos (N) ~ Po(λ)
+
+```{r preparacion_N}
+# generamos todos los días en el rango de dates
+all_days <- as.Date(seq(
+  min(df$Fecha.del.Siniestro),
+  by = "day",
+  length.out = as.integer(max(df$Fecha.del.Siniestro)+1 - min(df$Fecha.del.Siniestro))
+))
+
+# calculamos reclamos diarios con table
+right = data.frame(table(df$Fecha.del.Siniestro))
+right$Var1 <- as.Date(right$Var1)
+
+# si nuestro dataset tuviera días sin reclamos estos no aparecerían en la tabla de frecuencias
+left = data.frame(all_days)
+
+# utilizamos merge lo cual nos da un df con NA en las fechas que no hubo reclamos
+reclamos_diarios <- merge(left, right, by.x = 'all_days', by.y = "Var1", all.x = TRUE)
+
+# cambiamos el index a la columna de all_days
+rownames(reclamos_diarios) <- reclamos_diarios$all_days
+reclamos_diarios$all_days <- NULL
+
+# cambiamos los NAs por 0
+reclamos_diarios[is.na(reclamos_diarios)] <- 0
+
+# calculamos la proporción en la que sucede que haya x reclamos en un día
+proporciones = table(reclamos_diarios)/dim(reclamos_diarios)[1]
+
+x.ax = as.integer(names(proporciones))
+x.range = min(x.ax):max(x.ax)
+
+# también nos aseguramos de que las proporciones incluyan todos los valores dentro del rango de N
+proporciones = merge(
+  data.frame(reclamos_diarios = x.range),
+  data.frame(proporciones),
+  by = "reclamos_diarios",
+  all.x = TRUE
+  )
+
+# cambiamos el index a la columna de reclamos_diarios
+rownames(proporciones) <- x.range
+proporciones$reclamos_diarios <- NULL
+
+proporciones[is.na(proporciones)] <- 0
+
+  
+plot(
+  x = x.range,
+  y = proporciones$Freq,
+  main="Proporción de número de reclamos diarios",
+  xlab = "# de reclamos diarios",
+  ylab = "Proporción",
+  type = 'h',
+  lwd = 5
+  )
+```
+
+$H_{0}$: Sample is drawn from *Po(*$\lambda=\bar{N}$*)*
+
+$H_{1}$: Sample is **NOT** drawn from *Po(*$\lambda=\bar{N}$*)*
+
+```{r bondad_de_ajuste_Poisson}
+
+n_rate = mean(reclamos_diarios$Freq)
+
+candidate = dpois(x.range, lambda = n_rate)
+
+chisq.test(
+  as.vector(proporciones),
+  p=candidate,
+  rescale.p = TRUE,
+  simulate.p.value=TRUE)
+```
+
+```{r N-Po_visualizacion}
+
+plot(
+  x = x.range,
+  y = proporciones$Freq,
+  main = "Frecuencia de reclamos diarios y distribuciones Poisson",
+  xlab = "Cantidad de reclamos diarios",
+  ylab = "Frecuencia",
+  type = 'h',
+  lwd = 5,
+  col = 'gray70'
+  )
+
+lines(x.range,
+  candidate,
+  col='red',
+  lwd = 2
+  )
+
+
+legend("topright",
+  legend = paste0("Po(λ = ", round(n_rate, 3), ")"),
+  col = "red",
+  lwd = 2
+  )
+```
+
+# Monto de siniestro (Z) ~ Exp(λ)
+
+$H_{0}$: Sample is drawn from *exp(* $\lambda=\frac{1}{\overline{Z}}$*)* $H_{1}$: Sample is not from *exp(* $\lambda=\frac{1}{\overline{Z}}$*)*
+
+```{r}
+Z = df$Monto.del.siniestro
+ks.test(Z, pexp, rate = 1/mean(Z))
+```
+
+```{r Z-exp_visualizacion}
+xrange = seq(1, max(Z), 1000)
+z_rate = 1/mean(Z)
+
+
+hist(
+  Z,
+  breaks = 100,
+  freq = FALSE,
+  main = "Frecuencia de montos por siniestro y distribución exponencial",
+  xlab = "Monto por siniestro",
+  ylab = "Frecuencia"
+  )
+
+lines(
+  xrange,
+  dexp(xrange, rate = z_rate), 
+  col = 'red'
+  )
+
+legend("topright", 
+  legend = paste0(
+    'exp(λ = ',
+    round(z_rate, 7),
+    ')'
+    ),
+  lwd = 2,
+  col = 'red'
+  )
+```
+
+```{r simulaciones}
+library(ggplot2)
+library(ruin)
+
+iters = 1   # 1 para que cuando se corra el código no se tarde 20 minutos en esta chunk
+u = 2.5e7
+c = 2.29e6
+t_max = 10  # misma razón
+
+model <- CramerLundberg(initial_capital = u,
+                        premium_rate = c,
+                        claim_poisson_arrival_rate = n_rate,
+                        claim_size_generator = rexp,
+                        claim_size_parameters = list(rate = z_rate))
+
+ruined = c()
+paths = c()
+mins = c()
+
+for (i in 1:iters){
+  print(paste("Simulación", i))
+  path <- simulate_path(model = model, max_simulation_time = t_max)
+  paths[i] <- attributes(path)['path']
+  ruined[i] <- attributes(path)['is_ruined']
+}
+
+options(scipen = 999)
+
+canvas <- ggplot()
+
+for (i in 1:iters) {
+  if (ruined[[i]]) {
+    is_ruined = "red"
+  } else {
+    is_ruined = "green"
+  }
+  
+  data = data.frame(paths[i])
+  
+  mins[i] = min(data$X)
+  
+  canvas = canvas + geom_step(
+      data = data,
+      mapping = aes(
+        x = time,
+        y = X,
+        alpha = 1/iters
+        ),
+      direction = 'hv',
+      color = is_ruined
+      )
+}
+
+canvas <- canvas + scale_alpha(
+    guide = 'none'
+  ) + labs(
+    title = paste0(iters, " simulaciones de Cramer Lundberg"),
+    subtitle = paste0("u = ", u, ", c = ", c),
+    caption = paste0("Tiempo máximo de simulaciones: ", t_max, " s")
+  ) + geom_hline(aes(yintercept=0)) + theme_minimal()
+
+print(canvas)
+
+# plot_n = plot_n + 1 # plot_n tiene que ser inicializado a parte para no sobreescribir imágenes
+
+# ggsave(paste0("plot ", plot_n, ".png"))
+
+# aproximamos el capital inicial necesario utilizando la diferencia entre el capital inicial y el promedio de los puntos más bajos de las simulaciones menos una desviación estandar
+u - (mean(mins) - sd(mins))
+```
+
+```{r}
+
+model <- CramerLundberg(initial_capital = 14e6,
+                        premium_rate = 2.29e6,
+                        claim_poisson_arrival_rate = n_rate,
+                        claim_size_generator = rexp,
+                        claim_size_parameters = list(rate = z_rate))
+
+ruin_probability(model = model, time_horizon = 365, simulation_number = 10000, parallel = T)
+
+```
